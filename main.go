@@ -1,14 +1,16 @@
 package main
 
 import (
-	//"bytes"
+	"bytes"
 	"flag"
 	"fmt"
 	"github.com/jamesjj/podready"
 	"github.com/jamiealquiza/envy"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
+	"text/template"
 	"time"
 )
 
@@ -26,10 +28,15 @@ type config struct {
 	retryTime                *int64
 	doneAfterCountEmptyPolls *int
 	maxRecordsPerFile        *int
-	moveFilesAfterProcessing *string
+	targetPath               *string
 	logVerbose               *bool
 	sqsDelete                *bool
 	runDate                  *string
+}
+
+type pathStruct struct {
+	OriginalPath string
+	KeyParts     []string
 }
 
 type copyTaskItem struct {
@@ -60,7 +67,7 @@ func main() {
 		flag.Int64("retrydelay", 600, "Retry delay [SUGGEST: DO NOT CHANGE]"),
 		flag.Int("emptypolls", 3, "How many consecutive times to poll SQS and receive zero messages before exiting, 1+"),
 		flag.Int("maxrecords", 32, "Maximum number * 1024 of records in a single S3 file, 1+, e.g 2 sets the limit to 2048"),
-		flag.String("move", "", "Move email to this S3 prefix after processing. Date will be automatically added"),
+		flag.String("targetpath", "{{ .OriginalPath }}", "Target path go-template"),
 		flag.Bool("verbose", false, "Show detailed information during run"),
 		flag.Bool("deletesqs", true, "Delete messages from SQS after processing"),
 		&runDate,
@@ -72,6 +79,7 @@ func main() {
 		*conf.sqsRegion == "" ||
 		*conf.s3Name == "" ||
 		*conf.s3Region == "" ||
+		*conf.targetPath == "" ||
 		*conf.sqsPollTimeout < 1 ||
 		*conf.sqsPollTimeout > 20 ||
 		*conf.sqsPollMaxMessages > 20 ||
@@ -202,6 +210,7 @@ func main() {
 	}(conf, &wg)
 
 	// POLL SQS LOOP
+	pathTemplate := template.Must(template.New("path").Parse(*conf.targetPath))
 	pollCount := *conf.doneAfterCountEmptyPolls
 	for pollCount > 0 {
 
@@ -227,6 +236,19 @@ func main() {
 					RandStringBytes(16),
 				)
 
+				// TODO: make this more useful
+				pathMap := pathStruct{
+					OriginalPath: msgRecord.S3.Object.Key,
+					KeyParts:     strings.Split(msgRecord.S3.Object.Key, "/"),
+				}
+
+				pathBuf := &bytes.Buffer{}
+				err := pathTemplate.ExecuteTemplate(pathBuf, "path", pathMap)
+				if err != nil {
+					Error.Printf("Failed to execute targetpath template")
+					continue
+				}
+
 				item := copyTaskItem{
 					s3msgs.ReceiptHandle,
 					msgRecord.S3.Bucket.Name,
@@ -234,7 +256,7 @@ func main() {
 					*conf.s3Name,
 					*conf.s3Region,
 					msgRecord.S3.Object.Key,
-					fmt.Sprintf("output/%s", msgRecord.S3.Object.Key),
+					pathBuf.String(),
 					localFileName,
 				}
 
