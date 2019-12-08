@@ -95,9 +95,9 @@ func main() {
 	podready.Wait()
 
 	// TODO: control parallelism in channel buffers here
-	refreshMessageVisibilityChan := make(chan *copyTaskItem)
-	downloadFromS3Chan := make(chan *copyTaskItem)
-	uploadToS3Chan := make(chan *copyTaskItem)
+	refreshMessageVisibilityChan := make(chan *copyTaskItem, 128)
+	downloadFromS3Chan := make(chan *copyTaskItem, 4)
+	uploadToS3Chan := make(chan *copyTaskItem, 4)
 	deleteSqsChan := make(chan *copyTaskItem, 128)
 
 	sqsQ, sqsErr := sqsClient(*conf.sqsRegion, *conf.sqsName)
@@ -168,6 +168,10 @@ func main() {
 			)
 			// if no error then:
 			deleteSqsChan <- task
+			// if no error then:
+			if err := os.Remove(task.localPath); err != nil {
+				Error.Printf("Failed remove local file: %s, %v", task.localPath, err)
+			}
 
 		}
 	}(conf, &wg)
