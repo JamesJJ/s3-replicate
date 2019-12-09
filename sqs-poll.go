@@ -137,6 +137,6 @@ func sqsDecode(r *sqs.Message) *S3EventMsg {
 	if err := json.NewDecoder(recordSR).Decode(&s3msg); err != nil {
 		Error.Printf("SQS-S3 JSON Error: %#v", err)
 	}
-	Debug.Printf("UnMarshalled SQS JSON=%+v\n\n", s3msg)
+	Debug.Printf("UnMarshalled SQS JSON=%+v\n", s3msg)
 	return &s3msg
 }
