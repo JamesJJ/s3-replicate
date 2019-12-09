@@ -168,65 +168,71 @@ func main() {
 		}
 	}(conf, &wg, refreshMessageVisibilityChan, stopRefreshMessageVisibilityChan)
 
-	// UPLOAD TO S3 WORKERS
-	wg.Add(1)
-	go func(conf config, wg *sync.WaitGroup) {
-		defer Debug.Printf("Worker finished: Upload")
-		defer wg.Done()
-		defer close(deleteSqsChan)
+	for workerIndex := 0; workerIndex < int(*conf.parallelTransfers); workerIndex++ {
 
-		for task := range uploadToS3Chan {
-			if err := S3Upload(
-				&task.destBucket,
-				&task.destPath,
-				&task.destRegion,
-				&task.localPath,
-			); err == nil {
-				deleteSqsChan <- task
-				if err := os.Remove(task.localPath); err != nil {
-					Error.Printf("Failed remove local file: %s, %v", task.localPath, err)
-				}
-			}
+		// UPLOAD TO S3 WORKERS
+		wg.Add(1)
+		go func(conf config, wg *sync.WaitGroup, workerIndex int) {
+			defer Debug.Printf("Worker finished: Upload (%d)", workerIndex)
+			defer wg.Done()
+			defer close(deleteSqsChan)
+			Debug.Printf("Worker started: Upload (%d)", workerIndex)
 
-		}
-	}(conf, &wg)
-
-	// DOWNLOAD FROM S3 WORKERS
-	wg.Add(1)
-	go func(conf config, wg *sync.WaitGroup) {
-		defer Debug.Printf("Worker finished: Download")
-		defer wg.Done()
-		defer close(uploadToS3Chan)
-
-		for task := range downloadFromS3Chan {
-
-			s3Retry, errS3Download := S3Download(
-				&task.sourceBucket,
-				&task.sourcePath,
-				&task.sourceRegion,
-				&task.localPath,
-			)
-			if errS3Download == nil {
-				Debug.Printf("Downloaded OK: %v", task.sourcePath)
-				uploadToS3Chan <- task
-
-			} else {
-				Error.Printf(
-					"Failed to download from S3: s3://%s/%s (retry_later=%v)",
-					task.sourceBucket,
-					task.sourcePath,
-					s3Retry,
-				)
-				if s3Retry == true {
-					stopRefreshMessageVisibilityChan <- task
-				} else {
+			for task := range uploadToS3Chan {
+				if err := S3Upload(
+					&task.destBucket,
+					&task.destPath,
+					&task.destRegion,
+					&task.localPath,
+				); err == nil {
 					deleteSqsChan <- task
+					if err := os.Remove(task.localPath); err != nil {
+						Error.Printf("Failed remove local file: %s, %v (%d)", task.localPath, err, workerIndex)
+					}
 				}
 
 			}
+		}(conf, &wg, workerIndex)
 
-		}
-	}(conf, &wg)
+		// DOWNLOAD FROM S3 WORKERS
+		wg.Add(1)
+		go func(conf config, wg *sync.WaitGroup, workerIndex int) {
+			defer Debug.Printf("Worker finished: Download (%d)", workerIndex)
+			defer wg.Done()
+			defer close(uploadToS3Chan)
+			Debug.Printf("Worker started: Download (%d)", workerIndex)
+
+			for task := range downloadFromS3Chan {
+
+				s3Retry, errS3Download := S3Download(
+					&task.sourceBucket,
+					&task.sourcePath,
+					&task.sourceRegion,
+					&task.localPath,
+				)
+				if errS3Download == nil {
+					Debug.Printf("Downloaded OK: %v (%d)", task.sourcePath, workerIndex)
+					uploadToS3Chan <- task
+
+				} else {
+					Error.Printf(
+						"Failed to download from S3: s3://%s/%s (retry_later=%v) (%d)",
+						task.sourceBucket,
+						task.sourcePath,
+						s3Retry,
+						workerIndex,
+					)
+					if s3Retry == true {
+						stopRefreshMessageVisibilityChan <- task
+					} else {
+						deleteSqsChan <- task
+					}
+
+				}
+
+			}
+		}(conf, &wg, workerIndex)
+	}
 
 	// POLL SQS LOOP
 	pathTemplate := template.Must(template.New("path").Parse(*conf.targetPath))
