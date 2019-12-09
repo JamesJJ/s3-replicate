@@ -19,8 +19,6 @@ func S3Download(bucket *string, item *string, region *string, filename *string) 
 	}
 	defer file.Close()
 
-	Debug.Printf("Downloading s3://%s/%s (%s) ==> %s\n\n", *bucket, *item, *region, *filename)
-
 	sess, _ := session.NewSession(&aws.Config{
 		Region: aws.String(*region)},
 	)
@@ -45,7 +43,7 @@ func S3Download(bucket *string, item *string, region *string, filename *string) 
 		return true, fmt.Errorf("S3 Download Error: s3://%s/%s (%v)", *bucket, *item, err)
 	}
 
-	Debug.Printf("Downloaded %d bytes", numBytes)
+	Info.Printf("Downloaded: s3://%s/%s (%s) ==> %s (%d bytes)\n", *bucket, *item, *region, *filename, numBytes)
 
 	return false, nil
 }

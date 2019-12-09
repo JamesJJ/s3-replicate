@@ -11,7 +11,7 @@ import (
 
 func S3Upload(bucket *string, item *string, region *string, filename *string) error {
 
-	Info.Printf("Uploading: %s ==> s3://%s/%s (%s)", *filename, *bucket, *item, *region)
+	Info.Printf("Uploading: %s ==> s3://%s/%s (%s)\n", *filename, *bucket, *item, *region)
 
 	file, err := os.Open(*filename)
 	if err != nil {

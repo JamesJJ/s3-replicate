@@ -14,7 +14,7 @@ func gracefulStop(additional func()) {
 	signal.Notify(gracefulStop, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-gracefulStop
-		Debug.Printf("Caught signal: %+v", sig)
+		Info.Printf("Caught signal: %+v", sig)
 
 		additional()
 

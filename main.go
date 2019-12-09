@@ -25,12 +25,10 @@ type config struct {
 	s3Region                 *string
 	sqsPollTimeout           *int64
 	sqsPollMaxMessages       *int64
-	retryTime                *int64
-	doneAfterCountEmptyPolls *int
-	maxRecordsPerFile        *int
+	doneAfterCountEmptyPolls *int64
+	parallelTransfers        *int64
 	targetPath               *string
 	logVerbose               *bool
-	sqsDelete                *bool
 	runDate                  *string
 }
 
@@ -62,14 +60,12 @@ func main() {
 		flag.String("sqsregion", "", "AWS region of SQS queue [MANDATORY]"),
 		flag.String("bucket", "", "Name of the S3 bucket to store TSV files [MANDATORY]"),
 		flag.String("bucketregion", "", "AWS region of S3 bucket [MANDATORY]"),
-		flag.Int64("polltimeout", 10, "SQS slow poll timeout, 1-20"),
+		flag.Int64("polltimeout", 18, "SQS slow poll timeout, 1-20"),
 		flag.Int64("pollmessages", 10, "SQS maximum messages per poll, 1-10"),
-		flag.Int64("retrydelay", 600, "Retry delay [SUGGEST: DO NOT CHANGE]"),
-		flag.Int("emptypolls", 3, "How many consecutive times to poll SQS and receive zero messages before exiting, 1+"),
-		flag.Int("maxrecords", 32, "Maximum number * 1024 of records in a single S3 file, 1+, e.g 2 sets the limit to 2048"),
+		flag.Int64("emptypolls", 3, "How many consecutive times to poll SQS and receive zero messages before exiting, 1+"),
+		flag.Int64("parallel", 16, "How many files to transfer concurrently"),
 		flag.String("targetpath", "{{ .OriginalPath }}", "Target path go-template"),
 		flag.Bool("verbose", false, "Show detailed information during run"),
-		flag.Bool("deletesqs", true, "Delete messages from SQS after processing"),
 		&runDate,
 	}
 	envy.Parse("S3TOS3")
@@ -84,21 +80,23 @@ func main() {
 		*conf.sqsPollTimeout > 20 ||
 		*conf.sqsPollMaxMessages > 20 ||
 		*conf.sqsPollMaxMessages < 1 ||
-		*conf.maxRecordsPerFile < 1 ||
 		*conf.doneAfterCountEmptyPolls < 1 {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	logInit(conf)
-	gracefulStop(func() {})
-	podready.Wait()
-
-	// TODO: control parallelism in channel buffers here
 	refreshMessageVisibilityChan := make(chan *copyTaskItem, 128)
-	downloadFromS3Chan := make(chan *copyTaskItem, 4)
-	uploadToS3Chan := make(chan *copyTaskItem, 4)
+	stopRefreshMessageVisibilityChan := make(chan *copyTaskItem, 128)
+	downloadFromS3Chan := make(chan *copyTaskItem, *conf.parallelTransfers)
+	uploadToS3Chan := make(chan *copyTaskItem, *conf.parallelTransfers)
 	deleteSqsChan := make(chan *copyTaskItem, 128)
+
+	logInit(conf)
+	gracefulStop(func() {
+		*conf.doneAfterCountEmptyPolls = -1
+		time.Sleep(9 * time.Second)
+	})
+	podready.Wait()
 
 	sqsQ, sqsErr := sqsClient(*conf.sqsRegion, *conf.sqsName)
 	if sqsErr != nil {
@@ -115,13 +113,15 @@ func main() {
 			if err := deleteSqs(sqsQ, task.sqsReceipt); err != nil {
 				Error.Printf("Delete SQS: %#v", err)
 				time.Sleep(3 * time.Second)
+			} else {
+				stopRefreshMessageVisibilityChan <- task
 			}
 		}
 	}(conf, &wg, deleteSqsChan)
 
 	// REFRESH VISIBILITY SQS WORKER
 	wg.Add(1)
-	go func(conf config, wg *sync.WaitGroup, refreshMessageVisibilityChan chan *copyTaskItem) {
+	go func(conf config, wg *sync.WaitGroup, refreshMessageVisibilityChan chan *copyTaskItem, stopRefreshMessageVisibilityChan chan *copyTaskItem) {
 		defer Debug.Printf("Worker finished: SQS Refresh")
 		defer wg.Done()
 
@@ -145,12 +145,28 @@ func main() {
 				}
 				i++
 			}
+
+			select {
+			case task, more := <-stopRefreshMessageVisibilityChan:
+				if !more {
+					return
+				}
+				for i := 0; i < len(refreshList); {
+					if refreshList[i].sqsReceipt == task.sqsReceipt {
+						refreshList = append(refreshList[:i], refreshList[i+1:]...)
+						continue
+					}
+					i++
+				}
+			default:
+			}
+
 			if len(refreshList) > 0 {
 				Debug.Printf("SQS in refresh list: %d\n", len(refreshList))
 				time.Sleep(time.Duration(60/(1+len(refreshList))) * time.Second)
 			}
 		}
-	}(conf, &wg, refreshMessageVisibilityChan)
+	}(conf, &wg, refreshMessageVisibilityChan, stopRefreshMessageVisibilityChan)
 
 	// UPLOAD TO S3 WORKERS
 	wg.Add(1)
@@ -159,18 +175,17 @@ func main() {
 		defer wg.Done()
 		defer close(deleteSqsChan)
 
-		for task := range uploadToS3Chan { // TODO: Fix filename
-			S3Upload( // TODO: ERROR CHECKING
+		for task := range uploadToS3Chan {
+			if err := S3Upload(
 				&task.destBucket,
 				&task.destPath,
 				&task.destRegion,
 				&task.localPath,
-			)
-			// if no error then:
-			deleteSqsChan <- task
-			// if no error then:
-			if err := os.Remove(task.localPath); err != nil {
-				Error.Printf("Failed remove local file: %s, %v", task.localPath, err)
+			); err != nil {
+				deleteSqsChan <- task
+				if err := os.Remove(task.localPath); err != nil {
+					Error.Printf("Failed remove local file: %s, %v", task.localPath, err)
+				}
 			}
 
 		}
@@ -203,7 +218,7 @@ func main() {
 					s3Retry,
 				)
 				if s3Retry == true {
-					// TODO sqs pushback
+					stopRefreshMessageVisibilityChan <- task
 				} else {
 					deleteSqsChan <- task
 				}
