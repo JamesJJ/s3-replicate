@@ -181,7 +181,7 @@ func main() {
 				&task.destPath,
 				&task.destRegion,
 				&task.localPath,
-			); err != nil {
+			); err == nil {
 				deleteSqsChan <- task
 				if err := os.Remove(task.localPath); err != nil {
 					Error.Printf("Failed remove local file: %s, %v", task.localPath, err)
