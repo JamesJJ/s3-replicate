@@ -241,7 +241,7 @@ func main() {
 	pollCount := *conf.doneAfterCountEmptyPolls
 	for pollCount > 0 {
 
-		if (*conf.doneAfterCountEmptyPolls - pollCount) > 2 {
+		if (*conf.doneAfterCountEmptyPolls - pollCount) >= 2 {
 			time.Sleep(time.Duration(*conf.pollingBackoffSleep) * time.Second)
 		}
 
