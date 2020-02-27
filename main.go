@@ -26,6 +26,7 @@ type config struct {
 	sqsPollTimeout           *int64
 	sqsPollMaxMessages       *int64
 	doneAfterCountEmptyPolls *int64
+	pollingBackoffSleep      *int64
 	parallelTransfers        *int64
 	targetPath               *string
 	logVerbose               *bool
@@ -63,6 +64,7 @@ func main() {
 		flag.Int64("polltimeout", 18, "SQS slow poll timeout, 1-20"),
 		flag.Int64("pollmessages", 10, "SQS maximum messages per poll, 1-10"),
 		flag.Int64("emptypolls", 3, "How many consecutive times to poll SQS and receive zero messages before exiting, 1+"),
+		flag.Int64("pollbackoff", 0, "If no SQS messages sequentially, wait for this number of seconds before polling again"),
 		flag.Int64("parallel", 16, "How many files to transfer concurrently"),
 		flag.String("targetpath", "{{ .OriginalPath }}", "Target path go-template"),
 		flag.Bool("verbose", false, "Show detailed information during run"),
@@ -238,6 +240,10 @@ func main() {
 	pathTemplate := template.Must(template.New("path").Parse(*conf.targetPath))
 	pollCount := *conf.doneAfterCountEmptyPolls
 	for pollCount > 0 {
+
+		if (*conf.doneAfterCountEmptyPolls - pollCount) > 2 {
+			time.Sleep(time.Duration(*conf.pollingBackoffSleep) * time.Second)
+		}
 
 		Debug.Printf("pollCount=%d", pollCount)
 

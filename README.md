@@ -28,6 +28,9 @@ Configuration can be specified using command line flags or `S3TOS3_*` environmen
   -polltimeout int
     	SQS slow poll timeout, 1-20 [S3TOS3_POLLTIMEOUT] (default 18)
 
+  -pollbackoff int
+        If no SQS messages sequentially, wait for this number of seconds before polling again [S3TOS3_POLLBACKOFF] (default 0)
+
   -sqs string
     	Name of the SQS queue to poll [MANDATORY] [S3TOS3_SQS]
 
