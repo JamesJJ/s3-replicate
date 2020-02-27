@@ -241,12 +241,15 @@ func main() {
 
 		Debug.Printf("pollCount=%d", pollCount)
 
+		pollStart := time.Now()
 		s3records, err := PollSQS(conf)
 		if err != nil {
 			Error.Printf("Failed to poll SQS: %v", err)
 			pollCount--
 			continue
 		}
+		pollElapsed := time.Since(pollStart)
+		Info.Printf("SQS: Polled for %s, retrieved %d records", pollElapsed, len(s3records))
 
 		pollCount--
 		for _, s3msgs := range s3records {
