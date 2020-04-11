@@ -165,8 +165,8 @@ func main() {
 
 			if len(refreshList) > 0 {
 				Debug.Printf("SQS in refresh list: %d\n", len(refreshList))
-				time.Sleep(time.Duration(60/(1+len(refreshList))) * time.Second)
 			}
+			time.Sleep(time.Duration(60/(1+len(refreshList))) * time.Second)
 		}
 	}(conf, &wg, refreshMessageVisibilityChan, stopRefreshMessageVisibilityChan)
 

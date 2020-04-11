@@ -1,6 +1,6 @@
 ARG BASE_IMAGE=gcr.io/distroless/base
 
-ARG BUILD_IMAGE=golang:1.12-stretch
+ARG BUILD_IMAGE=golang:1.14-stretch
 
 #-----------------------------------------#
 
