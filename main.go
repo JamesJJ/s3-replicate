@@ -140,14 +140,6 @@ func main() {
 			default:
 			}
 
-			for i := 0; i < len(refreshList); {
-				if err := updateVisibilitySqs(sqsQ, refreshList[i].sqsReceipt, 180); err != nil {
-					refreshList = append(refreshList[:i], refreshList[i+1:]...)
-					continue
-				}
-				i++
-			}
-
 			select {
 			case task, more := <-stopRefreshMessageVisibilityChan:
 				if !more {
@@ -163,10 +155,19 @@ func main() {
 			default:
 			}
 
+			for i := 0; i < len(refreshList); {
+				if err := updateVisibilitySqs(sqsQ, refreshList[i].sqsReceipt, 180); err != nil {
+					Debug.Printf("SQS refresh error: %v\n", err)
+					refreshList = append(refreshList[:i], refreshList[i+1:]...)
+					continue
+				}
+				i++
+			}
+
 			if len(refreshList) > 0 {
 				Debug.Printf("SQS in refresh list: %d\n", len(refreshList))
 			}
-			time.Sleep(time.Duration(60/(1+len(refreshList))) * time.Second)
+			time.Sleep(time.Duration(10) * time.Second)
 		}
 	}(conf, &wg, refreshMessageVisibilityChan, stopRefreshMessageVisibilityChan)
 
