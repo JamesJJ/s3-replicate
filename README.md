@@ -1,6 +1,3 @@
-[![Docker Automated build](https://img.shields.io/docker/cloud/automated/jamesjj/s3-replicate)](https://hub.docker.com/r/jamesjj/s3-replicate/)
-[![Docker Automated build](https://img.shields.io/docker/cloud/build/jamesjj/s3-replicate)](https://hub.docker.com/r/jamesjj/s3-replicate/)
-
 # S3 Replicate
 
 Copies files from S3 to S3, with support for templated destination path and filename.
